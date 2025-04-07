@@ -27,7 +27,7 @@ AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 # Azure OpenAI client
 client = AzureOpenAI(
     api_key=AZURE_OPENAI_KEY,
-    api_version="2024-10-21",  
+    api_version="2023-07-01-preview",  
     azure_endpoint=AZURE_OPENAI_ENDPOINT
 )
 

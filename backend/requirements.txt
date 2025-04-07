@@ -5,4 +5,3 @@ botbuilder-core
 gunicorn
 aiohttp
 openai
-aiohttp

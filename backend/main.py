@@ -7,7 +7,7 @@ from botbuilder.core import (
     TurnContext
 )
 from botbuilder.schema import Activity
-import openai
+from openai import AzureOpenAI
 
 # Load environment variables
 load_dotenv()
@@ -24,11 +24,12 @@ AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
-# OpenAI config
-openai.api_type = "azure"
-openai.api_base = AZURE_OPENAI_ENDPOINT
-openai.api_version = "2023-05-15"  
-openai.api_key = AZURE_OPENAI_KEY
+# Azure OpenAI client
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_KEY,
+    api_version="2024-10-21",  
+    azure_endpoint=AZURE_OPENAI_ENDPOINT
+)
 
 # Bot Adapter setup
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
@@ -40,15 +41,15 @@ async def on_message_activity(turn_context: TurnContext):
         user_input = turn_context.activity.text
 
         try:
-            # Call GPT-3.5 Turbo via Azure OpenAI
-            response = openai.ChatCompletion.create(
-                engine=AZURE_OPENAI_DEPLOYMENT,
+            # New SDK call
+            response = client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT,
                 messages=[
                     {"role": "system", "content": "You are an AI assistant helping users during a hackathon."},
                     {"role": "user", "content": user_input}
                 ]
             )
-            ai_reply = response["choices"][0]["message"]["content"]
+            ai_reply = response.choices[0].message.content
         except Exception as e:
             ai_reply = f"⚠️ Azure OpenAI error: {str(e)}"
 

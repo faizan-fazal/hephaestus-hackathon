@@ -22,13 +22,14 @@ APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
 # Azure OpenAI credentials
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")  
+AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
 
-# Azure OpenAI client
+# Initialize AzureOpenAI client
 client = AzureOpenAI(
     api_key=AZURE_OPENAI_KEY,
-    api_version="2023-07-01-preview",  
-    azure_endpoint=AZURE_OPENAI_ENDPOINT
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_version=AZURE_OPENAI_API_VERSION
 )
 
 # Bot Adapter setup
@@ -41,7 +42,7 @@ async def on_message_activity(turn_context: TurnContext):
         user_input = turn_context.activity.text
 
         try:
-            # New SDK call
+            # Call Azure OpenAI Chat Completion
             response = client.chat.completions.create(
                 model=AZURE_OPENAI_DEPLOYMENT,
                 messages=[

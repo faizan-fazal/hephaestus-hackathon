@@ -4,3 +4,4 @@ python-dotenv
 botbuilder-core
 gunicorn
 aiohttp
+openai

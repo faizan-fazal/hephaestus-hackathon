@@ -23,7 +23,7 @@ load_dotenv()
 app = FastAPI()
 APP_ID = os.getenv("MICROSOFT_APP_ID", "")
 APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
-AZURE_CONNECTION_STRING = os.getenv("AZURE_AI_AGENT_PROJECT_CONNECTION_STRING")
+
 SEARCH_ID = os.getenv("SEARCH_ID")  # Optional
 
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
@@ -37,8 +37,9 @@ chat: AgentGroupChat = None
 # ---------------------------
 async def initialize_agents():
     creds = DefaultAzureCredential()
-    project_client = AIProjectClient.from_connection_string(
-        conn_str=AZURE_CONNECTION_STRING,
+    project_client = AIProjectClient(
+        endpoint=os.getenv("AZURE_AI_PROJECT_ENDPOINT"),
+        project_id=os.getenv("AZURE_AI_PROJECT_ID"),
         credential=creds
     )
     agent_client = AzureAIAgent.create_client(credential=creds)

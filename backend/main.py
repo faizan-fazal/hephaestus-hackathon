@@ -1,4 +1,5 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from botbuilder.core import (
@@ -7,52 +8,94 @@ from botbuilder.core import (
     TurnContext
 )
 from botbuilder.schema import Activity
-from openai import AzureOpenAI
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import AzureAISearchTool
+from semantic_kernel.agents import AgentGroupChat, AzureAIAgent
+from semantic_kernel.agents.strategies import DefaultTerminationStrategy
 
 # Load environment variables
 load_dotenv()
 
-# FastAPI app
+# ---------------------------
+# FASTAPI APP & BOT CONFIGURATION
+# ---------------------------
 app = FastAPI()
-
-# Microsoft Bot credentials
 APP_ID = os.getenv("MICROSOFT_APP_ID", "")
 APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
+AZURE_CONNECTION_STRING = os.getenv("AZURE_AI_AGENT_PROJECT_CONNECTION_STRING")
+SEARCH_ID = os.getenv("SEARCH_ID")  # Optional
 
-# Azure OpenAI credentials
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")  
-AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
-
-# Initialize AzureOpenAI client
-client = AzureOpenAI(
-    api_key=AZURE_OPENAI_KEY,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    api_version=AZURE_OPENAI_API_VERSION
-)
-
-# Bot Adapter setup
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
 adapter = BotFrameworkAdapter(adapter_settings)
 
-# Handle incoming message activity
+# Globals to hold agent chat session
+chat: AgentGroupChat = None
+
+# ---------------------------
+# ASYNC AGENT INITIALIZATION
+# ---------------------------
+
+async def initialize_agents():
+    creds = DefaultAzureCredential()
+    project_client = AIProjectClient.from_connection_string(
+        conn_str=AZURE_CONNECTION_STRING,
+        credential=creds
+    )
+    agent_client = AzureAIAgent.create_client(credential=creds)
+
+    ai_search = AzureAISearchTool(
+        index_connection_id=SEARCH_ID,
+        index_name="pdf-index",
+        query_type="vector_simple_hybrid"
+    )
+
+    question_agent = project_client.agents.create_agent(
+        model="gpt-4o-mini",
+        name="question-agent",
+        instructions="You are a geologist who asks specific questions about the Currie Bowman property."
+    )
+    answer_agent = project_client.agents.create_agent(
+        model="gpt-4o-mini",
+        name="answer-agent",
+        instructions="You are a helpful assistant with access to data about Currie Bowman property.",
+        tools=ai_search.definitions,
+        tool_resources=ai_search.resources,
+    )
+
+    question_agent_definition = await agent_client.agents.get_agent(agent_id=question_agent.id)
+    answer_agent_definition = await agent_client.agents.get_agent(agent_id=answer_agent.id)
+
+    sk_question_agent = AzureAIAgent(client=agent_client, definition=question_agent_definition)
+    sk_answer_agent = AzureAIAgent(client=agent_client, definition=answer_agent_definition)
+
+    return AgentGroupChat(
+        agents=[sk_question_agent, sk_answer_agent],
+        termination_strategy=DefaultTerminationStrategy(maximum_iterations=4)
+    )
+
+@app.on_event("startup")
+async def startup_event():
+    global chat
+    chat = await initialize_agents()
+
+# ---------------------------
+# BOT ACTIVITY HANDLING
+# ---------------------------
+
 async def on_message_activity(turn_context: TurnContext):
     if turn_context.activity.type == "message" and turn_context.activity.text:
         user_input = turn_context.activity.text
+        transcript_lines = []
 
         try:
-            # Call Azure OpenAI Chat Completion
-            response = client.chat.completions.create(
-                model=AZURE_OPENAI_DEPLOYMENT,
-                messages=[
-                    {"role": "system", "content": "You are an AI assistant helping users during a hackathon."},
-                    {"role": "user", "content": user_input}
-                ]
-            )
-            ai_reply = response.choices[0].message.content
+            async for response in chat.invoke(initial_message=user_input):
+                if response is None or not response.name:
+                    continue
+                transcript_lines.append(f"{response.name}: {response.content}")
+            ai_reply = "\n".join(transcript_lines)
         except Exception as e:
-            ai_reply = f"⚠️ Azure OpenAI error: {str(e)}"
+            ai_reply = f"⚠️ Agent error: {str(e)}"
 
         await turn_context.send_activity(ai_reply)
 
@@ -63,7 +106,10 @@ async def on_message_activity(turn_context: TurnContext):
                     "👋 Hi! I'm HephAIstus — your AI assistant for this hackathon project. Ask me anything!"
                 )
 
-# Bot message handler endpoint
+# ---------------------------
+# FASTAPI ENDPOINT
+# ---------------------------
+
 @app.post("/api/messages")
 async def messages(req: Request):
     try:

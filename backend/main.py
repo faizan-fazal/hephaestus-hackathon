@@ -23,9 +23,7 @@ load_dotenv()
 app = FastAPI()
 APP_ID = os.getenv("MICROSOFT_APP_ID", "")
 APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
-
-AZURE_PROJECT_ID = os.getenv("AZURE_AI_PROJECT_ID")
-AZURE_PROJECT_ENDPOINT = os.getenv("AZURE_AI_PROJECT_ENDPOINT")
+AZURE_CONNECTION_STRING = os.getenv("AZURE_AI_AGENT_PROJECT_CONNECTION_STRING")
 SEARCH_ID = os.getenv("SEARCH_ID")  # Optional
 
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
@@ -39,14 +37,10 @@ chat: AgentGroupChat = None
 # ---------------------------
 async def initialize_agents():
     creds = DefaultAzureCredential()
-
-    print(f"🔍 Connecting to Azure project: {AZURE_PROJECT_ID}")
-    project_client = AIProjectClient(
-        endpoint=AZURE_PROJECT_ENDPOINT,
-        project_id=AZURE_PROJECT_ID,
+    project_client = AIProjectClient.from_connection_string(
+        conn_str=AZURE_CONNECTION_STRING,
         credential=creds
     )
-
     agent_client = AzureAIAgent.create_client(credential=creds)
 
     ai_search = AzureAISearchTool(
@@ -63,7 +57,7 @@ async def initialize_agents():
     answer_agent = project_client.agents.create_agent(
         model="gpt-4o-mini",
         name="answer-agent",
-        instructions="You are a helpful assistant with access to data about the Currie Bowman property.",
+        instructions="You are a helpful assistant with access to data about Currie Bowman property.",
         tools=ai_search.definitions,
         tool_resources=ai_search.resources,
     )

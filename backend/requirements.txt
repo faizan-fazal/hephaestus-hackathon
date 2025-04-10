@@ -8,3 +8,4 @@ openai>=1.0.0
 azure-identity
 azure-ai-projects
 semantic-kernel>=0.9.0.dev0
+requests

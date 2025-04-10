@@ -1,5 +1,7 @@
 import os
 import asyncio
+import tempfile
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from botbuilder.core import (
@@ -29,13 +31,13 @@ SEARCH_ID = os.getenv("SEARCH_ID")  # Optional
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
 adapter = BotFrameworkAdapter(adapter_settings)
 
-# Globals to hold agent chat session
+# Globals to hold agent chat session and uploaded document text
 chat: AgentGroupChat = None
+user_documents = {}
 
 # ---------------------------
 # ASYNC AGENT INITIALIZATION
 # ---------------------------
-
 async def initialize_agents():
     creds = DefaultAzureCredential()
     project_client = AIProjectClient.from_connection_string(
@@ -82,13 +84,31 @@ async def startup_event():
 # ---------------------------
 # BOT ACTIVITY HANDLING
 # ---------------------------
-
 async def on_message_activity(turn_context: TurnContext):
-    if turn_context.activity.type == "message" and turn_context.activity.text:
+    user_id = turn_context.activity.from_property.id
+
+    if turn_context.activity.attachments:
+        attachment = turn_context.activity.attachments[0]
+        content_url = attachment.content_url
+        headers = {"Authorization": f"Bearer {turn_context.activity.service_url}"}
+        response = requests.get(content_url, headers=headers)
+
+        if response.status_code == 200:
+            text_content = response.content.decode("utf-8", errors="ignore")
+            user_documents[user_id] = text_content
+            await turn_context.send_activity("📎 Got your file. Now tell me what you’d like me to do with it.")
+        else:
+            await turn_context.send_activity("⚠️ Failed to retrieve the file.")
+
+    elif turn_context.activity.type == "message" and turn_context.activity.text:
         user_input = turn_context.activity.text
         transcript_lines = []
 
         try:
+            if user_id in user_documents:
+                user_input = f"Please summarize the following document:\n{user_documents[user_id]}\n\nInstruction: {user_input}"
+                del user_documents[user_id]
+
             async for response in chat.invoke(initial_message=user_input):
                 if response is None or not response.name:
                     continue
@@ -109,7 +129,6 @@ async def on_message_activity(turn_context: TurnContext):
 # ---------------------------
 # FASTAPI ENDPOINT
 # ---------------------------
-
 @app.post("/api/messages")
 async def messages(req: Request):
     try:

@@ -42,9 +42,8 @@ adapter = BotFrameworkAdapter(adapter_settings)
 # Conversation state
 memory = MemoryStorage()
 conversation_state = ConversationState(memory)
-conversation_property = conversation_state.create_property("conversation_data")
 
-# Helpers
+# Helpers for reading text from files
 def extract_text_from_pdf(path):
     with open(path, "rb") as f:
         reader = PdfReader(f)
@@ -59,46 +58,54 @@ def extract_text_from_txt(path):
         return f.read()
 
 async def download_and_extract_text(url, content_type):
-    suffix = ".pdf" if "pdf" in content_type else ".docx" if "word" in content_type else ".txt"
+    ext = ".tmp"
+    if "pdf" in content_type:
+        ext = ".pdf"
+    elif "word" in content_type:
+        ext = ".docx"
+    elif "text" in content_type:
+        ext = ".txt"
+
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise Exception(f"Download failed with status {resp.status}")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                 tmp.write(await resp.read())
                 tmp_path = tmp.name
 
-    if suffix == ".pdf":
+    if ext == ".pdf":
         text = extract_text_from_pdf(tmp_path)
-    elif suffix == ".docx":
+    elif ext == ".docx":
         text = extract_text_from_docx(tmp_path)
-    else:
+    elif ext == ".txt":
         text = extract_text_from_txt(tmp_path)
+    else:
+        text = ""
 
     os.remove(tmp_path)
     return text
 
 # Message handler
 async def on_message_activity(turn_context: TurnContext):
-    conversation_data = await conversation_property.get(turn_context, {})
+    conversation_property = conversation_state.create_property("conversation_data")
+    conversation_data = await conversation_property.get(turn_context)
+    if conversation_data is None:
+        conversation_data = {}
+        await conversation_property.set(turn_context, conversation_data)
 
-    # Check for attachments
     if turn_context.activity.attachments:
         attachment = turn_context.activity.attachments[0]
-        print("Received attachment of type:", attachment.content_type)
-
+        content_type = attachment.content_type
+        file_url = attachment.content_url
         try:
-            text = await download_and_extract_text(attachment.content_url, attachment.content_type)
+            text = await download_and_extract_text(file_url, content_type)
             conversation_data["last_uploaded_text"] = text
             await turn_context.send_activity("📄 Document received. You can now ask me to summarize it or analyze it!")
         except Exception as e:
             await turn_context.send_activity(f"⚠️ Error processing file: {str(e)}")
-
-        await conversation_property.set(turn_context, conversation_data)
-        await conversation_state.save_changes(turn_context)
         return
 
-    # Process user message
     elif turn_context.activity.type == "message" and turn_context.activity.text:
         user_input = turn_context.activity.text
         history = [
@@ -123,7 +130,6 @@ async def on_message_activity(turn_context: TurnContext):
         await turn_context.send_activity(ai_reply)
         conversation_data.pop("last_uploaded_text", None)
 
-    await conversation_property.set(turn_context, conversation_data)
     await conversation_state.save_changes(turn_context)
 
 # Endpoint

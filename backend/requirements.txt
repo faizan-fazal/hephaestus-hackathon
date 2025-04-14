@@ -5,3 +5,5 @@ botbuilder-core
 gunicorn
 aiohttp
 openai>=1.0.0
+python-docx
+PyPDF2

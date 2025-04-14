@@ -13,7 +13,7 @@ from botbuilder.core import (
 from botbuilder.schema import Activity
 from openai import AzureOpenAI
 from PyPDF2 import PdfReader
-from docx import Document
+from docx import Document as DocxDocument
 
 # Load environment variables
 load_dotenv()
@@ -43,65 +43,55 @@ adapter = BotFrameworkAdapter(adapter_settings)
 memory = MemoryStorage()
 conversation_state = ConversationState(memory)
 
-# Helpers for reading text from files
+# Helpers
+
 def extract_text_from_pdf(path):
     with open(path, "rb") as f:
         reader = PdfReader(f)
         return "\n".join([page.extract_text() or "" for page in reader.pages])
 
 def extract_text_from_docx(path):
-    doc = Document(path)
-    return "\n".join([para.text for para in doc.paragraphs])
+    doc = DocxDocument(path)
+    return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
 
 def extract_text_from_txt(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 async def download_and_extract_text(url, content_type):
-    ext = ".tmp"
-    if "pdf" in content_type:
-        ext = ".pdf"
-    elif "word" in content_type:
-        ext = ".docx"
-    elif "text" in content_type:
-        ext = ".txt"
-
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise Exception(f"Download failed with status {resp.status}")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            suffix = ".pdf" if content_type == "application/pdf" else ".docx" if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" else ".txt"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(await resp.read())
                 tmp_path = tmp.name
-
-    if ext == ".pdf":
+    
+    if suffix == ".pdf":
         text = extract_text_from_pdf(tmp_path)
-    elif ext == ".docx":
+    elif suffix == ".docx":
         text = extract_text_from_docx(tmp_path)
-    elif ext == ".txt":
-        text = extract_text_from_txt(tmp_path)
     else:
-        text = ""
+        text = extract_text_from_txt(tmp_path)
 
     os.remove(tmp_path)
     return text
 
 # Message handler
 async def on_message_activity(turn_context: TurnContext):
-    conversation_property = conversation_state.create_property("conversation_data")
-    conversation_data = await conversation_property.get(turn_context)
-    if conversation_data is None:
-        conversation_data = {}
-        await conversation_property.set(turn_context, conversation_data)
+    conversation_data_accessor = conversation_state.create_property("conversation_data")
+    conversation_data = await conversation_data_accessor.get(turn_context, default_factory=dict)
 
     if turn_context.activity.attachments:
         attachment = turn_context.activity.attachments[0]
-        content_type = attachment.content_type
         file_url = attachment.content_url
+        content_type = attachment.content_type
+
         try:
             text = await download_and_extract_text(file_url, content_type)
             conversation_data["last_uploaded_text"] = text
-            await turn_context.send_activity("📄 Document received. You can now ask me to summarize it or analyze it!")
+            await turn_context.send_activity("📄 Document received. You can now interact with its content. Feel free to ask me anything related to it!")
         except Exception as e:
             await turn_context.send_activity(f"⚠️ Error processing file: {str(e)}")
         return
@@ -129,6 +119,13 @@ async def on_message_activity(turn_context: TurnContext):
 
         await turn_context.send_activity(ai_reply)
         conversation_data.pop("last_uploaded_text", None)
+
+    elif turn_context.activity.type == "conversationUpdate":
+        for member in turn_context.activity.members_added:
+            if member.id != turn_context.activity.recipient.id:
+                await turn_context.send_activity(
+                    "👋 Hi! I'm HephAIstus — your AI assistant. How can I help you today?"
+                )
 
     await conversation_state.save_changes(turn_context)
 

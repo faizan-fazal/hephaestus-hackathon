@@ -13,7 +13,7 @@ from botbuilder.core import (
 from botbuilder.schema import Activity
 from openai import AzureOpenAI
 from PyPDF2 import PdfReader
-from docx import Document as DocxDocument
+from docx import Document
 
 # Load environment variables
 load_dotenv()
@@ -44,15 +44,14 @@ memory = MemoryStorage()
 conversation_state = ConversationState(memory)
 
 # Helpers
-
 def extract_text_from_pdf(path):
     with open(path, "rb") as f:
         reader = PdfReader(f)
         return "\n".join([page.extract_text() or "" for page in reader.pages])
 
 def extract_text_from_docx(path):
-    doc = DocxDocument(path)
-    return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+    doc = Document(path)
+    return "\n".join([para.text for para in doc.paragraphs])
 
 def extract_text_from_txt(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -63,16 +62,23 @@ async def download_and_extract_text(url, content_type):
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise Exception(f"Download failed with status {resp.status}")
-            suffix = ".pdf" if content_type == "application/pdf" else ".docx" if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" else ".txt"
+            suffix = {
+                "application/pdf": ".pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                "text/plain": ".txt"
+            }.get(content_type, None)
+            if suffix is None:
+                raise Exception("Unsupported file type")
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(await resp.read())
                 tmp_path = tmp.name
-    
+
     if suffix == ".pdf":
         text = extract_text_from_pdf(tmp_path)
     elif suffix == ".docx":
         text = extract_text_from_docx(tmp_path)
-    else:
+    elif suffix == ".txt":
         text = extract_text_from_txt(tmp_path)
 
     os.remove(tmp_path)
@@ -80,22 +86,23 @@ async def download_and_extract_text(url, content_type):
 
 # Message handler
 async def on_message_activity(turn_context: TurnContext):
-    conversation_data_accessor = conversation_state.create_property("conversation_data")
-    conversation_data = await conversation_data_accessor.get(turn_context, default_factory=dict)
+    prop = conversation_state.create_property("conversation_data")
+    conversation_data = await prop.get(turn_context, lambda: {})
 
+    # If document uploaded
     if turn_context.activity.attachments:
         attachment = turn_context.activity.attachments[0]
         file_url = attachment.content_url
         content_type = attachment.content_type
-
         try:
             text = await download_and_extract_text(file_url, content_type)
             conversation_data["last_uploaded_text"] = text
-            await turn_context.send_activity("📄 Document received. You can now interact with its content. Feel free to ask me anything related to it!")
+            await turn_context.send_activity("📄 Document received. You can now ask me what you want to do with it!")
         except Exception as e:
             await turn_context.send_activity(f"⚠️ Error processing file: {str(e)}")
         return
 
+    # If user sends message
     elif turn_context.activity.type == "message" and turn_context.activity.text:
         user_input = turn_context.activity.text
         history = [
@@ -123,9 +130,7 @@ async def on_message_activity(turn_context: TurnContext):
     elif turn_context.activity.type == "conversationUpdate":
         for member in turn_context.activity.members_added:
             if member.id != turn_context.activity.recipient.id:
-                await turn_context.send_activity(
-                    "👋 Hi! I'm HephAIstus — your AI assistant. How can I help you today?"
-                )
+                await turn_context.send_activity("👋 Hi! I'm HephAIstus — your AI assistant for this hackathon project. Upload a document or ask me anything to get started!")
 
     await conversation_state.save_changes(turn_context)
 

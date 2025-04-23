@@ -97,24 +97,34 @@ async def download_and_extract_text(url, content_type):
 @app.on_event("startup")
 async def initialize_agents():
     global agent_chat
+    print("⚙️ Initializing agents...")
+
     try:
         creds = DefaultAzureCredential()
+        print("🔐 DefaultAzureCredential loaded")
+
         project_client = AIProjectClient.from_connection_string(
             conn_str=AZURE_AI_AGENT_PROJECT_CONNECTION_STRING,
             credential=creds
         )
+        print("📡 Connected to AI Project Client")
+
         agent_client = AzureAIAgent.create_client(credential=creds)
+        print("🤖 AzureAIAgent client created")
 
         question_agent = project_client.agents.create_agent(
             model="gpt-4o-mini",
             name="question-agent",
             instructions="You are a thoughtful assistant that asks clarifying questions before answering."
         )
+
         answer_agent = project_client.agents.create_agent(
             model="gpt-4o-mini",
             name="answer-agent",
             instructions="You are a helpful AI that attempts to answer using uploaded document text if provided."
         )
+
+        print("📑 Agents created in Azure AI Project")
 
         question_agent_definition = await agent_client.agents.get_agent(agent_id=question_agent.id)
         answer_agent_definition = await agent_client.agents.get_agent(agent_id=answer_agent.id)
@@ -126,9 +136,11 @@ async def initialize_agents():
             agents=[sk_question_agent, sk_answer_agent],
             termination_strategy=DefaultTerminationStrategy(maximum_iterations=4)
         )
+
         print("✅ Agents initialized.")
     except Exception as e:
         print(f"❌ Agent initialization failed: {e}")
+
 
 # Message handler
 async def on_message_activity(turn_context: TurnContext):

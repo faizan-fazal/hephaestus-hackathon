@@ -20,12 +20,15 @@ from semantic_kernel.agents.strategies import TerminationStrategy
 from PyPDF2 import PdfReader
 from docx import Document
 
+from azure.identity import EnvironmentCredential
+
+
 
 # Lifespan handler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_dotenv()
-    creds = DefaultAzureCredential()
+    creds = EnvironmentCredential()
     app.state.credential = creds
     app.state.project_client = AIProjectClient.from_connection_string(
         conn_str=os.environ["AZURE_AI_AGENT_PROJECT_CONNECTION_STRING"],
